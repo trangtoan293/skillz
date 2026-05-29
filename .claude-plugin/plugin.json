@@ -1,0 +1,20 @@
+{
+  "name": "claude-dev-toolkit",
+  "description": "End-to-end development workflow for Claude Code: research the codebase, plan the implementation, and execute the plan with safe sequential or parallel modes. Three skills that chain together: research-codebase → plan-feature → execute-plan.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Toan Trang",
+    "email": "toantt@katalyst.vn"
+  },
+  "homepage": "https://github.com/TrangToan/claude-dev-toolkit",
+  "repository": "https://github.com/TrangToan/claude-dev-toolkit",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "research",
+    "planning",
+    "implementation",
+    "workflow",
+    "codebase-analysis"
+  ]
+}
