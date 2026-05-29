@@ -8,9 +8,9 @@
   "plugins": [
     {
       "name": "claude-dev-toolkit",
-      "source": ".",
+      "source": "./plugins/claude-dev-toolkit",
       "description": "End-to-end development workflow: research the codebase, plan the implementation, execute the plan (sequential or parallel), with multi-plan support and hand-off enforcement.",
-      "version": "1.2.0",
+      "version": "2.1.0",
       "homepage": "https://github.com/trangtoan293/skillz",
       "keywords": [
         "research",
