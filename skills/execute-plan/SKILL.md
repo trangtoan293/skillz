@@ -31,6 +31,27 @@ Also verify:
 - Current directory is a git repository (`git rev-parse --git-dir`)
 - Working tree is clean (`git status --porcelain` returns empty) — if dirty, stop and ask user to commit/stash first
 
+## Initialize Plan State (REQUIRED before any work)
+
+Before starting Phase 1, create the plan state directory. This is the signal the hand-off enforcement hook uses to detect an active plan:
+
+```bash
+TASK_SLUG="<short-kebab-case-from-task-name>"
+mkdir -p ".claude/plans/${TASK_SLUG}"
+```
+
+Write `.claude/plans/${TASK_SLUG}/PLAN.md` with the full plan, current phase, and progress. Update it as phases complete.
+
+## Finalize (REQUIRED at end of execution)
+
+When all phases are done (or the user stops execution), write/update `.claude/HANDOFF.md` documenting:
+- What was completed
+- What is still in progress (if any)
+- Files modified
+- Suggested next steps
+
+If the `handoff` skill is available, call it instead of writing manually.
+
 ## Mode 1: Sequential (Default - Safe)
 
 This is the default. Use when:

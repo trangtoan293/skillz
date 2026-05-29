@@ -104,6 +104,20 @@ Claude: [analyzes parallelism, asks approval, executes in worktrees,
          commits per phase, pauses for your review at each phase boundary]
 ```
 
+## Hand-off enforcement (built-in)
+
+The plugin ships with a smart Stop hook that prevents you from ending a session mid-plan without writing a hand-off note.
+
+**How it works:**
+- When `execute-plan` starts, it creates `.claude/plans/<task-slug>/` to mark "plan in progress"
+- The Stop hook checks: if `.claude/plans/` is non-empty → require fresh `.claude/HANDOFF.md`
+- If HANDOFF.md is missing or older than the latest commit → session is blocked until Claude writes it
+- If no plan is active → hook does nothing (stays out of the way)
+
+This means you never lose context between sessions, even if you forget to ask for a hand-off explicitly.
+
+**To disable** (not recommended), uninstall the plugin or override the Stop hook in your `~/.claude/settings.json`.
+
 ## Safety guarantees
 
 - Never uses `--no-verify` to skip hooks
