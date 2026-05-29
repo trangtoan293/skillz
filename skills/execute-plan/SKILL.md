@@ -1,6 +1,6 @@
 ---
 name: execute-plan
-description: Execute the implementation plan from a previous plan-feature call. Default mode is sequential and safe (one task at a time, pause between phases, auto-commit). Pass --parallel to enable git-worktree-based parallel execution for tasks that touch disjoint files. Use when the user has a plan ready and wants to start implementing.
+description: Execute the implementation plan from a previous plan-feature call. Default mode is sequential and safe (one task at a time, pause between phases, auto-commit). Pass --parallel to enable git-worktree-based parallel execution for tasks that touch disjoint files. Supports multiple plans per project via .claude/plans/<slug>/ directories with per-plan state and hand-off. Use when the user has a plan ready and wants to start implementing.
 ---
 
 # Execute Plan
@@ -10,47 +10,79 @@ You are an implementation executor. Execute the implementation plan from a previ
 ## Input
 Optional flags from the user:
 
-Supported flags:
 - `--parallel` — Enable parallel mode using git worktrees (advanced)
 - `--phase N` — Start from a specific phase (resume from interruption)
 - `--dry-run` — Show what would be done without making changes
+- `--slug <name>` — Override the auto-generated plan slug
 
 Default: sequential mode (safe), starting from Phase 1.
 
 ## Prerequisites Check
 
-Scan the conversation history for a previous `/plan-feature` result. Look for:
+Scan the conversation history for a previous `plan-feature` result. Look for:
 - A "Phases" section with numbered phases
 - An "Execution Checklist" with checkboxes
 - A "Files to Modify" section
 
 If not found, stop and tell the user:
-> "No implementation plan found. Please run `/research-codebase <task>` then `/plan-feature` first."
+> "No implementation plan found. Please run research-codebase then plan-feature first."
 
 Also verify:
 - Current directory is a git repository (`git rev-parse --git-dir`)
 - Working tree is clean (`git status --porcelain` returns empty) — if dirty, stop and ask user to commit/stash first
 
-## Initialize Plan State (REQUIRED before any work)
+## Multi-Plan Support
 
-Before starting Phase 1, create the plan state directory. This is the signal the hand-off enforcement hook uses to detect an active plan:
+This skill supports multiple concurrent plans in a project. Each plan lives in its own directory under `.claude/plans/<slug>/`:
 
-```bash
-TASK_SLUG="<short-kebab-case-from-task-name>"
-mkdir -p ".claude/plans/${TASK_SLUG}"
+```
+.claude/
+├── plans/
+│   ├── ACTIVE                       <- file containing slug of currently active plan
+│   ├── add-pdf-export/
+│   │   ├── PLAN.md                  <- plan content
+│   │   ├── STATE.md                 <- "in_progress" / "paused" / "completed"
+│   │   ├── PROGRESS.md              <- current phase, completed tasks
+│   │   └── HANDOFF.md               <- per-plan hand-off note
+│   └── _archive/
+│       └── old-feature/             <- completed plans archived here
 ```
 
-Write `.claude/plans/${TASK_SLUG}/PLAN.md` with the full plan, current phase, and progress. Update it as phases complete.
+## Initialize Plan State (REQUIRED before any work)
 
-## Finalize (REQUIRED at end of execution)
+1. **Generate a slug** from the task name (kebab-case, max 40 chars). Example: "Add PDF export to reports" → `add-pdf-export-reports`. Use `--slug` if user provided one.
 
-When all phases are done (or the user stops execution), write/update `.claude/HANDOFF.md` documenting:
-- What was completed
-- What is still in progress (if any)
-- Files modified
-- Suggested next steps
+2. **Check for existing plan with same slug:**
+   ```bash
+   if [ -d ".claude/plans/${SLUG}" ]; then
+     # ask user: resume existing, or rename?
+   fi
+   ```
 
-If the `handoff` skill is available, call it instead of writing manually.
+3. **Check active plan:** If `.claude/plans/ACTIVE` exists and points to a different slug, ask user:
+   > "Plan '<active-slug>' is currently active. Pause it and switch to '<new-slug>'? Or cancel?"
+   
+   If yes → set the old plan's `STATE.md` to `paused`, write its `HANDOFF.md`, then continue.
+
+4. **Create the plan directory:**
+   ```bash
+   mkdir -p ".claude/plans/${SLUG}"
+   echo "${SLUG}" > .claude/plans/ACTIVE
+   echo "in_progress" > ".claude/plans/${SLUG}/STATE.md"
+   ```
+
+5. **Write `.claude/plans/${SLUG}/PLAN.md`** with the full plan content from the plan-feature output.
+
+6. **Write `.claude/plans/${SLUG}/PROGRESS.md`** with the initial checklist:
+   ```markdown
+   # Progress: ${SLUG}
+   Started: <timestamp>
+   Mode: sequential | parallel
+   Current phase: 1
+   
+   - [ ] Phase 1: ...
+   - [ ] Phase 2: ...
+   ```
 
 ## Mode 1: Sequential (Default - Safe)
 
@@ -63,26 +95,18 @@ This is the default. Use when:
 For each phase in order:
 
 1. **Announce the phase**
-   > "Starting Phase N: [name]"
-
 2. **For each step in the phase:**
    - State what you're about to do
    - Implement the change (Edit/Write the file)
-   - Run relevant tests if any (`pytest tests/test_xxx.py`, `npm test`, etc.)
+   - Run relevant tests
    - If tests fail → stop, report error, wait for user
-
 3. **After all steps in the phase:**
    - Run the phase's "Verification" check from the plan
-   - Stage and commit:
-     ```bash
-     git add <changed files>
-     git commit -m "feat(phase-N): <phase name>"
-     ```
-   - Update the checklist in the conversation — mark Phase N items as `[x]`
-   - **PAUSE and ask the user:**
-     > "Phase N complete. Changes committed as `<commit-hash>`. Review the diff with `git show HEAD`. Continue to Phase N+1? (yes/no/details)"
-
-4. **Wait for user approval before continuing.** Do NOT auto-proceed to the next phase.
+   - Stage and commit: `git commit -m "feat(${SLUG} phase-N): <phase name>"`
+   - Update `.claude/plans/${SLUG}/PROGRESS.md` (mark phase done, increment current phase)
+   - **PAUSE** and ask the user:
+     > "Phase N complete. Commit `<hash>`. Continue to Phase N+1?"
+4. **Wait for user approval** before continuing.
 
 ## Mode 2: Parallel (Opt-in with `--parallel`)
 
@@ -90,112 +114,85 @@ Use when user passes `--parallel`. Requires careful task analysis.
 
 ### Pre-flight Analysis
 
-Before starting, analyze the plan:
-
-1. **Group tasks by file** — for each task, list which files it modifies
-2. **Identify parallel-safe groups** — tasks within a phase that touch **disjoint** sets of files
-3. **Identify sequential-required groups** — tasks that share files must run sequentially
-4. **Report the analysis** to the user:
-
-   ```
-   Phase 2 Analysis:
-     Parallel-safe (3 agents):
-       - Task 2.1 → src/pdf_export.py
-       - Task 2.2 → src/api/routes.py
-       - Task 2.3 → frontend/Button.tsx
-     Sequential-required (1 agent):
-       - Task 2.4 → modifies multiple files used above
-   
-   Proceed with parallel execution? (yes/no)
-   ```
-
-5. **Wait for user approval** before spawning anything.
+Before starting:
+1. Group tasks by file
+2. Identify parallel-safe groups (disjoint file sets)
+3. Identify sequential-required groups (shared files)
+4. Report the analysis and wait for user approval
 
 ### Execution
 
 After approval:
 
-1. **Create state file** at `.claude/plans/<task-slug>/STATE.md`:
-   ```markdown
-   # Plan State
-   ## Phase 2 (parallel)
-   - [⏳] 2.1 — owner: worker-1, branch: exec/phase2-task1, worktree: ../<repo>-phase2-task1
-   - [⏳] 2.2 — owner: worker-2, branch: exec/phase2-task2, worktree: ../<repo>-phase2-task2
-   - [⏳] 2.3 — owner: worker-3, branch: exec/phase2-task3, worktree: ../<repo>-phase2-task3
-   ```
-
+1. **Update PROGRESS.md** with worker assignments
 2. **Create one worktree per parallel task:**
    ```bash
-   git worktree add ../<repo>-phase2-task1 -b exec/phase2-task1
-   git worktree add ../<repo>-phase2-task2 -b exec/phase2-task2
-   git worktree add ../<repo>-phase2-task3 -b exec/phase2-task3
+   git worktree add ../<repo>-${SLUG}-task1 -b exec/${SLUG}-task1
    ```
-
-3. **For each worktree, dispatch a subagent** (using the Agent tool with `claude-haiku-4-5-20251001`):
-   - Subagent prompt: "You are worker-N. Working directory: `<worktree-path>`. Task: [task description]. Files: [allowed files]. Implement, test, commit on branch `exec/phase2-taskN`. Report when done."
-   - Restrict each worker to modifying only its assigned files
-
-4. **Wait for all workers in the phase to complete**
-
-5. **Merge back to main:**
+3. **Dispatch a subagent** (model: claude-haiku-4-5-20251001) per worktree, restricted to its assigned files
+4. **Wait for all workers** to complete
+5. **Merge back to main branch:**
    ```bash
-   git checkout main  # or the branch you started from
-   for branch in exec/phase2-task1 exec/phase2-task2 exec/phase2-task3; do
+   for branch in exec/${SLUG}-task1 ...; do
      git merge --no-ff $branch -m "Merge $branch"
    done
    ```
+6. **Cleanup worktrees and branches**
+7. **Pause and ask** before continuing to next phase
 
-6. **Handle conflicts** if any (should be rare since files were disjoint):
-   - Report conflict to user
-   - Pause and let user resolve manually
-   - Do NOT auto-resolve
+## Finalize (REQUIRED on completion or pause)
 
-7. **Cleanup worktrees:**
+### When plan completes:
+1. Set state to completed:
    ```bash
-   git worktree remove ../<repo>-phase2-task1
-   git worktree remove ../<repo>-phase2-task2
-   git worktree remove ../<repo>-phase2-task3
-   git branch -d exec/phase2-task1 exec/phase2-task2 exec/phase2-task3
+   echo "completed" > ".claude/plans/${SLUG}/STATE.md"
    ```
+2. Write `.claude/plans/${SLUG}/HANDOFF.md` documenting:
+   - What was completed
+   - Files modified (with commits)
+   - Test results
+   - Any follow-up work needed
+3. Archive the plan:
+   ```bash
+   mkdir -p .claude/plans/_archive
+   mv ".claude/plans/${SLUG}" ".claude/plans/_archive/${SLUG}-$(date +%Y%m%d)"
+   ```
+4. Clear ACTIVE: `rm .claude/plans/ACTIVE`
 
-8. **Run phase verification** (tests, build, etc.)
+### When user pauses (stop, exit, switch plan):
+1. Set state to paused: `echo "paused" > ".claude/plans/${SLUG}/STATE.md"`
+2. Write `.claude/plans/${SLUG}/HANDOFF.md` with:
+   - Current phase / step
+   - What was just completed
+   - What is next
+   - Any blockers or open questions
+3. Do NOT remove ACTIVE — leave it so the hook can verify hand-off
 
-9. **Pause and ask user** before continuing to next phase (same as sequential mode)
+## Safety Rules
 
-## Safety Rules (BOTH modes)
-
-- **Never use `--no-verify`** to skip hooks
-- **Never use `git reset --hard`** without explicit user permission
-- **Never force-push** to main/master
-- **If tests fail** → stop immediately, do not "fix" by changing the tests
-- **If a step is ambiguous** → ask user before guessing
-- **If file doesn't exist** that the plan references → stop and report (plan may be stale)
-- **Always pause between phases** — no auto-proceed across phase boundaries
+- Never use `--no-verify` to skip hooks
+- Never use `git reset --hard` without explicit user permission
+- Never force-push to main/master
+- If tests fail → stop immediately, do not modify tests to make them pass
+- If a step is ambiguous → ask user before guessing
+- Always pause between phases — no auto-proceed
+- Always update STATE.md and write HANDOFF.md before ending the session
 
 ## Resume Support
 
-If interrupted (user stops, error, etc.):
-- State is preserved in:
-  - Git commits (per-phase)
-  - `.claude/plans/<task-slug>/STATE.md` (in parallel mode)
-- User can resume with `/execute-plan --phase N` to skip already-done phases
+To resume a plan: `/switch-plan <slug>` then `/execute-plan --phase N`.
 
 ## Output Per Phase
 
-After each phase:
-
 ```
-✅ Phase N complete: [phase name]
+Phase N complete: <phase name>
 
-Changes:
-- src/file_a.py — added X function
-- tests/test_a.py — added 2 test cases
-
-Commit: <hash> "feat(phase-N): <name>"
-
+Plan: <slug>
+Commit: <hash>
 Tests: 12 passed, 0 failed
-Verification: ✅ <verification step from plan>
+Verification: <verification step>
 
-Next: Phase N+1 — [next phase name]
+Progress saved to .claude/plans/<slug>/PROGRESS.md
+Next: Phase N+1 — <next phase name>
 Continue? (yes / no / show diff)
 ```

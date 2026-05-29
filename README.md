@@ -1,12 +1,16 @@
 # claude-dev-toolkit
 
-End-to-end development workflow for Claude Code. Three skills that chain together to take you from "I have a task" to "code is committed":
+End-to-end development workflow for Claude Code. Five skills that chain together to take you from "I have a task" to "code is committed":
 
 ```
 /claude-dev-toolkit:research-codebase  ← find WHERE the code lives
 /claude-dev-toolkit:plan-feature       ← define HOW to implement
-/claude-dev-toolkit:execute-plan       ← DO IT (with optional parallel mode)
+/claude-dev-toolkit:execute-plan       ← DO IT (sequential or parallel)
+/claude-dev-toolkit:list-plans         ← see all plans + status
+/claude-dev-toolkit:switch-plan        ← pause one, resume another
 ```
+
+Supports **multiple plans per project** — work on several features concurrently, pause and resume without losing context.
 
 ## Install
 
@@ -104,17 +108,38 @@ Claude: [analyzes parallelism, asks approval, executes in worktrees,
          commits per phase, pauses for your review at each phase boundary]
 ```
 
+## Multiple plans per project
+
+Each plan lives in its own directory under `.claude/plans/`:
+
+```
+.claude/plans/
+├── ACTIVE                       ← slug of the currently active plan
+├── add-pdf-export/
+│   ├── PLAN.md                  ← the plan content
+│   ├── STATE.md                 ← in_progress / paused / completed
+│   ├── PROGRESS.md              ← current phase, checklist progress
+│   └── HANDOFF.md               ← per-plan hand-off
+├── fix-login-bug/
+│   └── ...
+└── _archive/
+    └── old-feature-20260515/    ← completed plans archived with date
+```
+
+You can have several plans in different states (one active, several paused) and switch between them freely. Use `/list-plans` to see them all and `/switch-plan <slug>` to swap.
+
 ## Hand-off enforcement (built-in)
 
 The plugin ships with a smart Stop hook that prevents you from ending a session mid-plan without writing a hand-off note.
 
 **How it works:**
-- When `execute-plan` starts, it creates `.claude/plans/<task-slug>/` to mark "plan in progress"
-- The Stop hook checks: if `.claude/plans/` is non-empty → require fresh `.claude/HANDOFF.md`
-- If HANDOFF.md is missing or older than the latest commit → session is blocked until Claude writes it
-- If no plan is active → hook does nothing (stays out of the way)
+- `execute-plan` creates `.claude/plans/<slug>/STATE.md` set to `in_progress`
+- The Stop hook scans every plan directory; for any plan with state `in_progress` it requires a fresh `HANDOFF.md`
+- If HANDOFF.md is missing or older than the latest commit → Stop is blocked until Claude writes it
+- Plans with state `paused`, `completed`, or in `_archive/` are not checked
+- Projects without `.claude/plans/` are ignored entirely
 
-This means you never lose context between sessions, even if you forget to ask for a hand-off explicitly.
+This means you never lose context between sessions or when juggling multiple plans, even if you forget to ask for a hand-off explicitly.
 
 **To disable** (not recommended), uninstall the plugin or override the Stop hook in your `~/.claude/settings.json`.
 
