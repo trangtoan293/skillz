@@ -14,18 +14,26 @@ Supports **multiple plans per project** — work on several features concurrentl
 
 ## Install
 
-### From this repo (development)
+### Recommended: install via marketplace
 
-```bash
-git clone https://github.com/TrangToan/claude-dev-toolkit.git
-claude --plugin-dir ./claude-dev-toolkit
+In a running Claude Code session:
+
+```
+/plugin marketplace add trangtoan293/skillz
+/plugin install claude-dev-toolkit@skillz
 ```
 
-### From a marketplace (once published)
+Updates later:
+```
+/plugin marketplace update skillz
+/plugin update claude-dev-toolkit
+```
+
+### Alternative: load directly (development)
 
 ```bash
-/plugin marketplace add TrangToan/claude-dev-toolkit
-/plugin install claude-dev-toolkit
+git clone https://github.com/trangtoan293/skillz.git ~/skillz
+claude --plugin-dir ~/skillz
 ```
 
 ## Skills

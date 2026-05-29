@@ -1,0 +1,24 @@
+{
+  "name": "skillz",
+  "owner": {
+    "name": "Toan Trang",
+    "email": "toantt@katalyst.vn"
+  },
+  "description": "Personal Claude Code plugin marketplace by trangtoan293",
+  "plugins": [
+    {
+      "name": "claude-dev-toolkit",
+      "source": ".",
+      "description": "End-to-end development workflow: research the codebase, plan the implementation, execute the plan (sequential or parallel), with multi-plan support and hand-off enforcement.",
+      "version": "1.2.0",
+      "homepage": "https://github.com/trangtoan293/skillz",
+      "keywords": [
+        "research",
+        "planning",
+        "implementation",
+        "workflow",
+        "multi-plan"
+      ]
+    }
+  ]
+}
